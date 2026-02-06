@@ -34,12 +34,12 @@ namespace MetricsBenchmark
         }
 
         // --- Summary helpers (как у тебя было) ---
-        static void PrintSummary(string name, IReadOnlyList<IterationResult> results)
+        static void PrintSummary(string name, IReadOnlyList<IterationResult> results, int intervalMs)
         {
             var n = results.Count;
             if (n == 0)
             {
-                Console.WriteLine("No results.");
+                Console.WriteLine("Нет результатов.");
                 return;
             }
 
@@ -62,35 +62,46 @@ namespace MetricsBenchmark
             double avgProcs = procSum / (double)n;
 
             var sSnap = Stats.SummarizeLong(snap);
-            var sMet = Stats.SummarizeLong(met);
-            var sTot = Stats.SummarizeLong(tot);
+            var sMet  = Stats.SummarizeLong(met);
+            var sTot  = Stats.SummarizeLong(tot);
             var sAlloc = Stats.SummarizeLong(alloc);
+
+            // Производные метрики
+            double msPerProc = avgProcs > 0 ? sTot.Mean / avgProcs : 0;
+            double kbPerProc = avgProcs > 0 ? (sAlloc.Mean / 1024.0) / avgProcs : 0;
+
+            double dutyMean = intervalMs > 0 ? (sTot.Mean / intervalMs) * 100.0 : 0;
+            double dutyP95  = intervalMs > 0 ? (sTot.P95  / intervalMs) * 100.0 : 0;
+            bool overrunP95 = intervalMs > 0 && sTot.P95 > intervalMs;
+
+            double jitter = sTot.Median > 0 ? sTot.P95 / sTot.Median : 0;
 
             double avgTotalSec = sTot.Mean / 1000.0;
             double procsPerSec = avgTotalSec > 0 ? avgProcs / avgTotalSec : 0;
 
             Console.WriteLine();
-            Console.WriteLine($"==== {name} summary ====");
-            Console.WriteLine($"Iterations: {n}, Avg processes: {avgProcs:F0}");
+            Console.WriteLine($"==== Сводка: {name} ====");
+            Console.WriteLine($"Итераций: {n}, Среднее число процессов: {avgProcs:F0}, Интервал опроса: {intervalMs} мс");
             Console.WriteLine();
 
+            // mean=среднее, med=медиана, p95=95-й перцентиль, max=максимум
             static string Line(string label, Stats.Summary s) =>
-                $"{label,-10} mean {s.Mean,7:F2} ms | med {s.Median,6:F0} ms | p95 {s.P95,6:F0} ms | max {s.Max,6:F0} ms";
+                $"{label,-24} среднее {s.Mean,7:F2} мс | медиана {s.Median,6:F0} мс | p95 {s.P95,6:F0} мс | max {s.Max,6:F0} мс";
 
-            Console.WriteLine(Line("snapshot", sSnap));
-            Console.WriteLine(Line("metrics", sMet));
-            Console.WriteLine(Line("total", sTot));
+            Console.WriteLine(Line("Снимок CPU (snapshot):", sSnap));
+            Console.WriteLine(Line("Сбор метрик (metrics):", sMet));
+            Console.WriteLine(Line("Итого за итерацию:", sTot));
+
             Console.WriteLine();
-            Console.WriteLine($"alloc      mean {sAlloc.Mean / 1024.0,7:F1} KB | p95 {sAlloc.P95 / 1024.0,6:F1} KB | max {sAlloc.Max / 1024.0,6:F1} KB");
-            Console.WriteLine($"throughput ~ {procsPerSec:F0} processes/sec (avg)");
+            Console.WriteLine($"На 1 процесс: {msPerProc:F4} мс/процесс | {kbPerProc:F1} КБ мусора/процесс (alloc)");
+            Console.WriteLine($"Бюджет опроса: среднее {dutyMean:F1}% интервала | p95 {dutyP95:F1}% | p95 превышает интервал: {(overrunP95 ? "ДА" : "НЕТ")}");
+            Console.WriteLine($"Стабильность: p95/медиана = {jitter:F2}x (чем ближе к 1.0 — тем ровнее)");
+            Console.WriteLine($"Пропускная способность: ~ {procsPerSec:F0} процессов/сек (в среднем)");
             Console.WriteLine("========================");
         }
 
         static void PrintDelta(string aName, IReadOnlyList<IterationResult> a, string bName, IReadOnlyList<IterationResult> b)
         {
-            // delta делаем по total mean/p95 и т.п.
-            // Для простоты используем те же SummarizeLong, как в PrintSummary.
-
             static (Stats.Summary snap, Stats.Summary met, Stats.Summary tot, Stats.Summary alloc) Summ(IReadOnlyList<IterationResult> r)
             {
                 int n = r.Count;
@@ -115,34 +126,43 @@ namespace MetricsBenchmark
                 );
             }
 
+            static string Sign(double v) => v >= 0 ? "+" : "-";
+            static double Abs(double v) => v >= 0 ? v : -v;
+
             var sa = Summ(a);
             var sb = Summ(b);
 
             Console.WriteLine();
-            Console.WriteLine("==== delta (B vs A) ====");
+            Console.WriteLine("==== Разница (B относительно A) ====");
             Console.WriteLine($"A = {aName}");
             Console.WriteLine($"B = {bName}");
+            Console.WriteLine("Пояснение: '+X' означает, что B медленнее/тяжелее; '-X' — что B быстрее/легче.");
             Console.WriteLine();
 
             static string DeltaLine(string label, Stats.Summary A, Stats.Summary B)
             {
                 double dMean = B.Mean - A.Mean;
-                double dP95 = B.P95 - A.P95;
+                double dP95  = B.P95  - A.P95;
 
                 double pctMean = A.Mean > 0 ? (B.Mean / A.Mean - 1) * 100 : 0;
-                double pctP95 = A.P95 > 0 ? (B.P95 / A.P95 - 1) * 100 : 0;
+                double pctP95  = A.P95  > 0 ? (B.P95  / A.P95  - 1) * 100 : 0;
 
-                return $"{label,-10} mean {dMean,7:F2} ms ({pctMean,6:F1}%) | p95 {dP95,6:F0} ms ({pctP95,6:F1}%)";
+                string meanPart = $"{Sign(dMean)}{Abs(dMean),6:F2} мс ({pctMean,6:F1}%)";
+                string p95Part  = $"{Sign(dP95)}{Abs(dP95),6:F0} мс ({pctP95,6:F1}%)";
+
+                return $"{label,-22} среднее {meanPart} | p95 {p95Part}";
             }
 
-            Console.WriteLine(DeltaLine("snapshot", sa.snap, sb.snap));
-            Console.WriteLine(DeltaLine("metrics", sa.met, sb.met));
-            Console.WriteLine(DeltaLine("total", sa.tot, sb.tot));
+            Console.WriteLine(DeltaLine("Снимок CPU (snapshot):", sa.snap, sb.snap));
+            Console.WriteLine(DeltaLine("Сбор метрик (metrics):", sa.met, sb.met));
+            Console.WriteLine(DeltaLine("Итого за итерацию:",     sa.tot, sb.tot));
 
+            double dAllocKb = (sb.alloc.Mean - sa.alloc.Mean) / 1024.0;
             double allocPct = sa.alloc.Mean > 0 ? (sb.alloc.Mean / sa.alloc.Mean - 1) * 100 : 0;
+
             Console.WriteLine();
-            Console.WriteLine($"alloc mean  {(sb.alloc.Mean - sa.alloc.Mean) / 1024.0:F1} KB ({allocPct:F1}%)");
-            Console.WriteLine("========================");
+            Console.WriteLine($"Память (alloc):          среднее {Sign(dAllocKb)}{Abs(dAllocKb),6:F1} КБ ({allocPct,6:F1}%)");
+            Console.WriteLine("===============================");
         }
 
         static IReadOnlyList<IterationResult> RunCollector(IProcessCollector collector, int iterations, int intervalMs, bool csv)
@@ -170,8 +190,8 @@ namespace MetricsBenchmark
             var resA = RunCollector(procfs, iterations, intervalMs, csv);
             var resB = RunCollector(hybrid, iterations, intervalMs, csv);
 
-            PrintSummary(procfs.Name, resA);
-            PrintSummary(hybrid.Name, resB);
+            PrintSummary(procfs.Name, resA, intervalMs);
+            PrintSummary(hybrid.Name, resB, intervalMs);
             PrintDelta(procfs.Name, resA, hybrid.Name, resB);
         }
 
@@ -218,7 +238,7 @@ namespace MetricsBenchmark
                 };
 
                 var results = RunCollector(collector, iterations, intervalMs, csv);
-                PrintSummary(collector.Name, results);
+                PrintSummary(collector.Name, results, intervalMs);
             }
         }
     }
