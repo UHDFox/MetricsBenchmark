@@ -1,19 +1,12 @@
 ﻿using MetricsBenchmark.Models.Data;
 using MetricsBenchmark.Services;
 using System.Diagnostics;
+using MetricsBenchmark.Models.Results;
 
 namespace MetricsBench;
 
 public sealed class BenchmarkRunner
 {
-    public sealed record IterationResult(
-        int Iteration,
-        int Processes,
-        long SnapshotMs,
-        long MetricsMs,
-        long AllocBytes
-    );
-
     public IReadOnlyList<IterationResult> Run(
         IProcessCollector collector,
         int iterations,
@@ -45,11 +38,14 @@ public sealed class BenchmarkRunner
 
             var allocAfter = GC.GetAllocatedBytesForCurrentThread();
 
+            var totalMs = sw1.ElapsedMilliseconds + sw2.ElapsedMilliseconds;
+
             results.Add(new IterationResult(
                 Iteration: i,
                 Processes: metrics.Count,
                 SnapshotMs: sw1.ElapsedMilliseconds,
                 MetricsMs: sw2.ElapsedMilliseconds,
+                TotalMs: totalMs,
                 AllocBytes: allocAfter - allocBefore
             ));
 
