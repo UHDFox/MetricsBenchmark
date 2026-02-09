@@ -6,7 +6,7 @@ using System.Diagnostics;
 
 namespace MetricsBench.Collectors;
 
-public sealed class HybridCollector : IProcessCollector
+public sealed class HybridCollector 
 {
     public string Name => "hybrid";
     public CollectorOptions Options { get; }

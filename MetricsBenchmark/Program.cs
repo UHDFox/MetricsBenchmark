@@ -100,6 +100,8 @@ namespace MetricsBenchmark
             Console.WriteLine("========================");
         }
 
+
+
         static void PrintDelta(string aName, IReadOnlyList<IterationResult> a, string bName, IReadOnlyList<IterationResult> b)
         {
             static (Stats.Summary snap, Stats.Summary met, Stats.Summary tot, Stats.Summary alloc) Summ(IReadOnlyList<IterationResult> r)
@@ -184,17 +186,16 @@ namespace MetricsBenchmark
 
         static void RunCompare(int iterations, int intervalMs, CollectorOptions opts, bool csv)
         {
-            var procfs = new ProcFsCollector(opts);
-            var hybrid = new HybridCollector(opts);
+            var seq = new ProcFsCollector(opts);
+            var par = new ProcFsParallelCollector(opts);
 
-            var resA = RunCollector(procfs, iterations, intervalMs, csv);
-            var resB = RunCollector(hybrid, iterations, intervalMs, csv);
+            var resA = RunCollector(seq, iterations, intervalMs, csv);
+            var resB = RunCollector(par, iterations, intervalMs, csv);
 
-            PrintSummary(procfs.Name, resA, intervalMs);
-            PrintSummary(hybrid.Name, resB, intervalMs);
-            PrintDelta(procfs.Name, resA, hybrid.Name, resB);
+            PrintSummary(seq.Name, resA, intervalMs);
+            PrintSummary(par.Name, resB, intervalMs);
+            PrintDelta(seq.Name, resA, par.Name, resB);
         }
-
         static void Main(string[] args)
         {
             // IDE-friendly: без аргументов сразу compare
@@ -233,7 +234,6 @@ namespace MetricsBenchmark
                 IProcessCollector collector = mode switch
                 {
                     "procfs" => new ProcFsCollector(opts),
-                    "hybrid" => new HybridCollector(opts),
                     _ => throw new ArgumentException("Unknown mode: " + mode)
                 };
 
