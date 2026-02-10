@@ -1,7 +1,7 @@
 ﻿public class ProcStat
 {
     /// <summary>
-    /// Имя процесса (comm) из /proc/[pid]/stat
+    /// comm, Имя процесса из /proc/[pid]/stat
     /// </summary>
     public string ProcessName { get; }
 
@@ -11,27 +11,27 @@
     public char State { get; }
 
     /// <summary>
-    /// CPU-время пользователя в тиках
+    /// utime, CPU-время пользователя в тиках
     /// </summary>
     public long UserCpuTicks { get; }
 
     /// <summary>
-    /// CPU-время ядра в тиках
+    /// stime, CPU-время ядра в тиках
     /// </summary>
     public long KernelCpuTicks { get; }
 
     /// <summary>
-    /// Время старта процесса в тиках с момента загрузки системы
+    /// StartTime, Время старта процесса в тиках с момента загрузки системы
     /// </summary>
     public long StartTimeTicks { get; }
 
     /// <summary>
-    /// Размер виртуальной памяти процесса (байты)
+    /// vSize, Размер виртуальной памяти процесса (байты)
     /// </summary>
     public long VirtualMemoryBytes { get; }
 
     /// <summary>
-    /// Resident Set Size в страницах памяти
+    /// Rss, Resident Set Size в страницах памяти
     /// </summary>
     public long ResidentSetPages { get; }
 
@@ -48,7 +48,7 @@
     }
 
     /// <summary>
-    /// Общие CPU-типы (user + kernel)
+    /// Общие CPU-типы (utime + stime)
     /// </summary>
     public long TotalCpuTicks => UserCpuTicks + KernelCpuTicks;
 }
