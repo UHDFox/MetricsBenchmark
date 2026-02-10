@@ -2,74 +2,99 @@
 
 namespace MetricsBenchmark.Services.Infrastructure
 {
-    public static class ProcParsers
+        public static class ProcParsers
     {
-        private const int StatBase = 4;
-        // /proc/[pid]/stat tricky: comm in parentheses may contain spaces.
-        // Fields (1-based): 1 pid, 2 comm, 3 state, 14 utime, 15 stime, 22 starttime, 23 vsize, 24 rss
+        // После извлечения comm (2) и state (3) первый токен соответствует полю №4 (ppid)
+        private const int FirstTokenFieldIndex = 4;
+        // Смещение между tokenIndex (начинается с 1) и реальным номером поля в /proc/[pid]/stat
+        private const int FieldOffset = FirstTokenFieldIndex - 1;
+
         public static ProcStat? ParseStat(string statLine)
         {
-            int open = statLine.IndexOf('(');
-            int close = statLine.LastIndexOf(')');
-            if (open < 0 || close <= open) return null;
+            int openParenIndex = statLine.IndexOf('(');
+            int closeParenIndex = statLine.LastIndexOf(')');
 
-            string comm = statLine.Substring(open + 1, close - open - 1);
-            if (close + 2 >= statLine.Length) return null;
-
-            var after = statLine.AsSpan(close + 2);
-            if (after.Length < 1) return null;
-
-            char state = after[0];
-            ReadOnlySpan<char> tokenSpan = after.Length > 2 ? after.Slice(2) : ReadOnlySpan<char>.Empty;
-
-            long utime = 0, stime = 0, start = 0, vsize = 0, rss = 0;
-
-            int tokenIndex = 0;
-            for (int pos = 0, startPos = 0; pos <= tokenSpan.Length; pos++)
+            if (openParenIndex < 0 || closeParenIndex <= openParenIndex) 
             {
-                bool atEnd = pos == tokenSpan.Length;
-                bool isSpace = !atEnd && tokenSpan[pos] == ' ';
-                if (atEnd || isSpace)
-                {
-                    int len = pos - startPos;
-                    if (len > 0)
-                    {
-                        tokenIndex++;
-                        var token = tokenSpan.Slice(startPos, len);
-                        switch ((ProcessStatField)(tokenIndex + 4 - 1))
-                        {
-                            case ProcessStatField.Utime: TryParseInt64(token, out utime); break;
-                            case ProcessStatField.Stime: TryParseInt64(token, out stime); break;
-                            case ProcessStatField.StartTime: TryParseInt64(token, out start); break;
-                            case ProcessStatField.Vsize: TryParseInt64(token, out vsize); break;
-                            case ProcessStatField.Rss: TryParseInt64(token, out rss); break;
-                        }
-                    }
-                    startPos = pos + 1;
-                }
+                return null;
+            }
+            var processNameLength = closeParenIndex - openParenIndex - 1;
+            string processName = statLine.Substring(openParenIndex + 1, processNameLength);
+            if (closeParenIndex + 2 >= statLine.Length) 
+            {
+                return null;
             }
 
-            return new ProcStat(comm, state, utime, stime, start, vsize, rss);
+            // Строка после "comm) "
+            var afterCommSpan = statLine.AsSpan(closeParenIndex + 2);
+            if (afterCommSpan.Length < 1) 
+            {
+                return null;
+            }
+
+            char state = afterCommSpan[0];
+
+            // Пропускаем "state " и получаем только числовые поля
+            ReadOnlySpan<char> tokenSpan =
+                afterCommSpan.Length > 2 ? afterCommSpan.Slice(2) : ReadOnlySpan<char>.Empty;
+
+            long utime = 0;
+            long stime = 0;
+            long startTime = 0;
+            long vsize = 0;
+            long rss = 0;
+
+            EnumerateTokens(tokenSpan, (token, tokenIndex) =>
+            {
+                // tokenIndex начинается с 1 и соответствует полю №4 (ppid)
+                int fieldIndex = FirstTokenFieldIndex + FieldOffset;
+
+                switch ((ProcessStatField)fieldIndex)
+                {
+                    case ProcessStatField.Utime:
+                        long.TryParse(token, out utime);
+                        break;
+
+                    case ProcessStatField.Stime:
+                        long.TryParse(token, out stime);
+                        break;
+
+                    case ProcessStatField.StartTime:
+                        long.TryParse(token, out startTime);
+                        break;
+
+                    case ProcessStatField.Vsize:
+                        long.TryParse(token, out vsize);
+                        break;
+
+                    case ProcessStatField.Rss:
+                        long.TryParse(token, out rss);
+                        break;
+                }
+            });
+
+            return new ProcStat(processName, state, utime, stime, startTime, vsize, rss);
         }
 
-
-
+        /// <summary>
+        /// Разбивает ReadOnlySpan<char> на токены по пробелам и вызывает callback для каждого токена.
+        /// </summary>
+        /// <param name="input">Входной span с текстом для токенизации.</param>
+        /// <param name="onToken">Callback, принимающий токен и его порядковый номер (начиная с 1).</param>
         public static void EnumerateTokens(
-        ReadOnlySpan<char> input,
-        Action<ReadOnlySpan<char>, int> onToken)
+            ReadOnlySpan<char> input,
+            Action<ReadOnlySpan<char>, int> onToken)
         {
             int tokenStart = 0;
-            int position = 0;
+            int currentPosition = 0;
             int tokenIndex = 0;
 
-            while (position < input.Length)
+            while (currentPosition < input.Length)
             {
-                char currentChar = input[position];
-                bool isSeparator = currentChar == ' ';
-
+                var isSeparator = input[currentPosition].Equals(' ');
                 if (isSeparator)
                 {
-                    int tokenLength = position - tokenStart;
+                    int tokenLength = currentPosition - tokenStart;
 
                     if (tokenLength > 0)
                     {
@@ -77,46 +102,20 @@ namespace MetricsBenchmark.Services.Infrastructure
                         onToken(input.Slice(tokenStart, tokenLength), tokenIndex);
                     }
 
-                    tokenStart = position + 1;
+                    tokenStart = currentPosition + 1; // переходим к следующему токену
                 }
 
-                position++;
+                currentPosition++;
             }
 
+            // Обрабатываем последний токен, если он не пустой
             int lastTokenLength = input.Length - tokenStart;
+
             if (lastTokenLength > 0)
             {
                 tokenIndex++;
                 onToken(input.Slice(tokenStart, lastTokenLength), tokenIndex);
             }
-        }
-
-        // Fast-ish parser for positive/negative integer in span
-        private static bool TryParseInt64(ReadOnlySpan<char> s, out long value)
-        {
-            value = 0;
-            if (s.Length == 0) return false;
-
-            int i = 0;
-            bool neg = false;
-
-            if (s[0] == '-')
-            {
-                neg = true;
-                i = 1;
-                if (i >= s.Length) return false;
-            }
-
-            long v = 0;
-            for (; i < s.Length; i++)
-            {
-                char c = s[i];
-                if ((uint)(c - '0') > 9) return false;
-                v = checked(v * 10 + (c - '0'));
-            }
-
-            value = neg ? -v : v;
-            return true;
         }
 
         // /proc/[pid]/status for Uid, Threads, VmRSS, VmSize
@@ -127,7 +126,7 @@ namespace MetricsBenchmark.Services.Infrastructure
             out long? vmRssBytes,
             out long? vmSizeBytes)
         {
-            uid = -1;
+            uid = default;
             threads = null;
             vmRssBytes = null;
             vmSizeBytes = null;
