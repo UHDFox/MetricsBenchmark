@@ -7,85 +7,51 @@ namespace MetricsBenchmark.Services.Infrastructure
         private const int StatBase = 4;
         // /proc/[pid]/stat tricky: comm in parentheses may contain spaces.
         // Fields (1-based): 1 pid, 2 comm, 3 state, 14 utime, 15 stime, 22 starttime, 23 vsize, 24 rss
-        public static bool TryParseStat(
-         string statLine,
-         out string comm,
-         out char state,
-         out long utimeTicks,
-         out long stimeTicks,
-         out long startTimeTicks,
-         out long vsizeBytes,
-         out long rssPages)
+        public static ProcStat? TryParseStat(string statLine)
         {
-            comm = "";
-            state = '?';
-            utimeTicks = stimeTicks = startTimeTicks = 0;
-            vsizeBytes = 0;
-            rssPages = 0;
+            int open = statLine.IndexOf('(');
+            int close = statLine.LastIndexOf(')');
+            if (open < 0 || close <= open) return null;
 
-            int left = statLine.IndexOf('(');
-            int right = statLine.LastIndexOf(')');
-            if (left < 0 || right <= left)
-            {
-                return false;
-            }
+            string comm = statLine.Substring(open + 1, close - open - 1);
+            if (close + 2 >= statLine.Length) return null;
 
-            comm = statLine.Substring(left + 1, right - left - 1);
+            var after = statLine.AsSpan(close + 2);
+            if (after.Length < 1) return null;
 
-            if (right + 2 >= statLine.Length)
-            {
-                return false;
-            }
+            char state = after[0];
+            ReadOnlySpan<char> tokenSpan = after.Length > 2 ? after.Slice(2) : ReadOnlySpan<char>.Empty;
 
-            var after = statLine.AsSpan(right + 2);
-            if (after.Length < 1) return false;
-
-            state = after[0];
-            ReadOnlySpan<char> nums = after.Length > 2 ? after.Slice(2) : ReadOnlySpan<char>.Empty;
+            long utime = 0, stime = 0, start = 0, vsize = 0, rss = 0;
 
             int tokenIndex = 0;
-            for (int pos = 0, tokenStart = 0; pos <= nums.Length; pos++)
+            for (int pos = 0, startPos = 0; pos <= tokenSpan.Length; pos++)
             {
-                bool atEnd = pos == nums.Length;
-                bool isSpace = !atEnd && nums[pos] == ' ';
-
+                bool atEnd = pos == tokenSpan.Length;
+                bool isSpace = !atEnd && tokenSpan[pos] == ' ';
                 if (atEnd || isSpace)
                 {
-                    int length = pos - tokenStart;
-                    if (length > 0)
+                    int len = pos - startPos;
+                    if (len > 0)
                     {
                         tokenIndex++;
-                        var token = nums.Slice(tokenStart, length);
-
-                        switch ((ProcessStatField)tokenIndex + StatBase - 1)
+                        var token = tokenSpan.Slice(startPos, len);
+                        switch ((ProcessStatField)(tokenIndex + 4 - 1))
                         {
-                            case ProcessStatField.Utime:
-                                TryParseInt64(token, out utimeTicks);
-                                break;
-
-                            case ProcessStatField.Stime:
-                                TryParseInt64(token, out stimeTicks);
-                                break;
-
-                            case ProcessStatField.StartTime:
-                                TryParseInt64(token, out startTimeTicks);
-                                break;
-
-                            case ProcessStatField.Vsize:
-                                TryParseInt64(token, out vsizeBytes);
-                                break;
-
-                            case ProcessStatField.Rss:
-                                TryParseInt64(token, out rssPages);
-                                return utimeTicks >= 0 && stimeTicks >= 0;
+                            case ProcessStatField.Utime: TryParseInt64(token, out utime); break;
+                            case ProcessStatField.Stime: TryParseInt64(token, out stime); break;
+                            case ProcessStatField.StartTime: TryParseInt64(token, out start); break;
+                            case ProcessStatField.Vsize: TryParseInt64(token, out vsize); break;
+                            case ProcessStatField.Rss: TryParseInt64(token, out rss); break;
                         }
                     }
-                    tokenStart = pos + 1;
+                    startPos = pos + 1;
                 }
             }
 
-            return utimeTicks >= 0 && stimeTicks >= 0;
+            return new ProcStat(comm, state, utime, stime, start, vsize, rss);
         }
+
 
 
         public static void EnumerateTokens(

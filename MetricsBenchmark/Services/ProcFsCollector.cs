@@ -36,11 +36,12 @@ public sealed class ProcFsCollector : IProcessCollector
             var statPath = Path.Combine(dir, "stat");
             try
             {
-                var stat = File.ReadAllText(statPath);
-                if (!ProcParsers.TryParseStat(stat, out _, out _, out var ut, out var st, out _, out _, out _))
+                var statRaw = File.ReadAllText(statPath);
+                var stat = ProcParsers.TryParseStat(statRaw);
+                if (stat is null)
                     continue;
 
-                dict[pid] = (new CpuSnapshot(pid, ut + st, now));
+                dict[pid] = (new CpuSnapshot(pid, stat.TotalCpuTicks, now));
             }
             catch
             {
@@ -63,11 +64,12 @@ public sealed class ProcFsCollector : IProcessCollector
                 continue; // нет дельты => пропускаем CPU% (или можно 0)
 
             var dir = $"/proc/{pid}";
+            var statPath = Path.Combine(dir, "stat");
             try
             {
-                var statLine = File.ReadAllText(Path.Combine(dir, "stat"));
-                if (!ProcParsers.TryParseStat(statLine, out var comm, out var state,
-                        out var ut, out var st, out var startTicks, out var vsizeBytes, out var rssPages))
+                var statRaw = File.ReadAllText(statPath);
+                var stat = ProcParsers.TryParseStat(statRaw);
+                if (stat is null)
                     continue;
 
                 // CPU% — нормализовано
@@ -88,14 +90,14 @@ public sealed class ProcFsCollector : IProcessCollector
 
                 // startTime: boot + ticks/HZ
                 const double HZ = 100.0;
-                var start = _bootTime.BootTimeUtc.AddSeconds(startTicks / HZ);
+                var start = _bootTime.BootTimeUtc.AddSeconds(stat.StartTimeTicks / HZ);
 
                 // rss: предпочтительно VmRSS (bytes). иначе rssPages*pageSize
-                var rssBytes = vmRssBytes ?? rssPages * _pageSize;
+                var rssBytes = vmRssBytes ?? stat.ResidentSetPages * _pageSize;
 
                 long? vmsBytes = null;
                 if (Options.IncludeVms)
-                    vmsBytes = vmSizeBytes ?? vsizeBytes;
+                    vmsBytes = vmSizeBytes ?? stat.VirtualMemoryBytes;
 
                 int? thr = Options.IncludeThreads ? threads : null;
 
@@ -104,7 +106,7 @@ public sealed class ProcFsCollector : IProcessCollector
                     readBytes = ProcParsers.ReadReadBytesFromIo(Path.Combine(dir, "io"));
 
                 // processName: comm из stat
-                var processName = comm;
+                var processName = stat.ProcessName;
 
                 list.Add(new ProcessMetrics(
                     Pid: pid,
@@ -116,7 +118,7 @@ public sealed class ProcFsCollector : IProcessCollector
                     RssBytes: rssBytes,
                     VmsBytes: vmsBytes,
                     Threads: thr,
-                    State: state,
+                    State: stat.State,
                     ReadBytes: readBytes
                 ));
             }

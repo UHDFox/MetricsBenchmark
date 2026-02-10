@@ -1,12 +1,11 @@
 ﻿using MetricsBenchmark.Models;
 using MetricsBenchmark.Models.Data;
-using MetricsBenchmark.Services;
 using MetricsBenchmark.Services.Infrastructure;
 using System.Diagnostics;
 
 namespace MetricsBench.Collectors;
 
-public sealed class HybridCollector 
+public sealed class HybridCollector
 {
     public string Name => "hybrid";
     public CollectorOptions Options { get; }
@@ -84,20 +83,20 @@ public sealed class HybridCollector
                 // startTime: можно попытаться из Process.StartTime, но на Linux это часто pain.
                 // Берём из /proc/stat (унифицируем с ProcFS).
                 var statLine = File.ReadAllText(Path.Combine(dir, "stat"));
-                if (!ProcParsers.TryParseStat(statLine, out _, out var state,
-                        out _, out _, out var startTicks, out var vsizeBytes, out var rssPages))
+                var stat = ProcParsers.TryParseStat(statLine);
+                if (stat is null)
                     continue;
 
                 const double HZ = 100.0;
-                var start = _bootTime.BootTimeUtc.AddSeconds(startTicks / HZ);
+                var start = _bootTime.BootTimeUtc.AddSeconds(stat.StartTimeTicks / HZ);
 
                 var cpuPercent = CpuDelta.ComputeCpuPercent(prevCpu, currCpu, _cpuCount);
 
-                var rssBytes = vmRssBytes ?? (rssPages * (long)_pageSize);
+                var rssBytes = vmRssBytes ?? (stat.ResidentSetPages * (long)_pageSize);
 
                 long? vmsBytes = null;
                 if (Options.IncludeVms)
-                    vmsBytes = vmSizeBytes ?? vsizeBytes;
+                    vmsBytes = vmSizeBytes ?? stat.VirtualMemoryBytes;
 
                 int? thr = Options.IncludeThreads ? threads : null;
 
@@ -115,7 +114,7 @@ public sealed class HybridCollector
                     RssBytes: rssBytes,
                     VmsBytes: vmsBytes,
                     Threads: thr,
-                    State: state,
+                    State: stat.State,
                     ReadBytes: readBytes
                 ));
             }

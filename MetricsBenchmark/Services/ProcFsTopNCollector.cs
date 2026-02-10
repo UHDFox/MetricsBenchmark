@@ -1,8 +1,8 @@
-using System.Collections.Concurrent;
 using MetricsBenchmark.Models;
 using MetricsBenchmark.Models.Data;
 using MetricsBenchmark.Services;
 using MetricsBenchmark.Services.Infrastructure;
+using System.Collections.Concurrent;
 
 public sealed class ProcFsParallelCollector : IProcessCollector
 {
@@ -38,11 +38,12 @@ public sealed class ProcFsParallelCollector : IProcessCollector
             var statPath = Path.Combine(dir, "stat");
             try
             {
-                var stat = File.ReadAllText(statPath);
-                if (!ProcParsers.TryParseStat(stat, out _, out _, out var ut, out var st, out _, out _, out _))
+                var statRaw = File.ReadAllText(statPath);
+                var stat = ProcParsers.TryParseStat(statRaw);
+                if (stat is null)
                     return;
 
-                result[pid] = new CpuSnapshot(pid, ut + st, now);
+                result[pid] = new CpuSnapshot(pid, stat.TotalCpuTicks, now);
             }
             catch { }
         });
@@ -65,11 +66,12 @@ public sealed class ProcFsParallelCollector : IProcessCollector
                 return;
 
             var dir = $"/proc/{pid}";
+            var statPath = Path.Combine(dir, "stat");
             try
             {
-                var statLine = File.ReadAllText(Path.Combine(dir, "stat"));
-                if (!ProcParsers.TryParseStat(statLine, out var comm, out var state,
-                        out var ut, out var st, out var startTicks, out var vsizeBytes, out var rssPages))
+                var statRaw = File.ReadAllText(statPath);
+                var stat = ProcParsers.TryParseStat(statRaw);
+                if (stat is null)
                     return;
 
                 var cpuPercent = CpuDelta.ComputeCpuPercent(prevCpu, currCpu, _cpuCount);
@@ -86,9 +88,9 @@ public sealed class ProcFsParallelCollector : IProcessCollector
 
                 var user = uid >= 0 ? _passwd.Resolve(uid) : "unknown";
 
-                var startTime = _bootTime.BootTimeUtc.AddSeconds(startTicks / 100.0);
-                var rssBytes = vmRssBytes ?? rssPages * _pageSize;
-                long? vmsBytes = Options.IncludeVms ? (vmSizeBytes ?? vsizeBytes) : null;
+                var startTime = _bootTime.BootTimeUtc.AddSeconds(stat.StartTimeTicks / 100.0);
+                var rssBytes = vmRssBytes ?? stat.ResidentSetPages * _pageSize;
+                long? vmsBytes = Options.IncludeVms ? (vmSizeBytes ?? stat.VirtualMemoryBytes) : null;
                 int? thr = Options.IncludeThreads ? threads : null;
                 long? readBytes = Options.IncludeReadBytes
                     ? ProcParsers.ReadReadBytesFromIo(Path.Combine(dir, "io"))
@@ -96,7 +98,7 @@ public sealed class ProcFsParallelCollector : IProcessCollector
 
                 result.Add(new ProcessMetrics(
                     Pid: pid,
-                    ProcessName: comm,
+                    ProcessName: stat.ProcessName,
                     CmdLine: cmdline,
                     User: user,
                     StartTime: startTime,
@@ -104,7 +106,7 @@ public sealed class ProcFsParallelCollector : IProcessCollector
                     RssBytes: rssBytes,
                     VmsBytes: vmsBytes,
                     Threads: thr,
-                    State: state,
+                    State: stat.State,
                     ReadBytes: readBytes
                 ));
             }
