@@ -8,6 +8,7 @@ namespace MetricsBenchmark.Services.Infrastructure
         private const int FirstTokenFieldIndex = 4;
         // Смещение между tokenIndex (начинается с 1) и реальным номером поля в /proc/[pid]/stat
         private const int FieldOffset = FirstTokenFieldIndex - 1;
+        private const int UnknownUid = -1;
 
         public static ProcStat? ParseStat(string statLine)
         {
@@ -118,7 +119,14 @@ namespace MetricsBenchmark.Services.Infrastructure
             }
         }
 
-        // /proc/[pid]/status for Uid, Threads, VmRSS, VmSize
+        /// <summary>
+        /// Парсит строки из /proc/[pid]/status и извлекает UID, количество потоков, RSS и виртуальную память.
+        /// </summary>
+        /// <param name="lines">Строки файла status.</param>
+        /// <param name="uid">UID процесса.</param>
+        /// <param name="threads">Количество потоков (если найдено).</param>
+        /// <param name="vmRssBytes">Resident Set Size в байтах (если найдено).</param>
+        /// <param name="vmSizeBytes">Виртуальная память в байтах (если найдено).</param>
         public static void ParseStatus(
             IEnumerable<string> lines,
             out int uid,
@@ -126,49 +134,71 @@ namespace MetricsBenchmark.Services.Infrastructure
             out long? vmRssBytes,
             out long? vmSizeBytes)
         {
-            uid = default;
+            uid = UnknownUid;
             threads = null;
             vmRssBytes = null;
             vmSizeBytes = null;
 
             foreach (var line in lines)
             {
-                if (line.StartsWith("Uid:", StringComparison.Ordinal))
+                var parts = line.Split((char[])null!, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 2) 
                 {
-                    var parts = line.Split((char[])null!, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length >= 2 && int.TryParse(parts[1], out var u)) uid = u;
+                    continue;
                 }
-                else if (line.StartsWith("Threads:", StringComparison.Ordinal))
+
+                // Определяем нужное поле по префиксу строки
+                switch (parts[0])
                 {
-                    var parts = line.Split((char[])null!, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length == 2 && int.TryParse(parts[1], out var t)) threads = t;
-                }
-                else if (line.StartsWith("VmRSS:", StringComparison.Ordinal))
-                {
-                    var parts = line.Split((char[])null!, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length >= 2 && long.TryParse(parts[1], out var kb)) vmRssBytes = kb * 1024;
-                }
-                else if (line.StartsWith("VmSize:", StringComparison.Ordinal))
-                {
-                    var parts = line.Split((char[])null!, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length >= 2 && long.TryParse(parts[1], out var kb)) vmSizeBytes = kb * 1024;
+                    case "Uid:":
+                        if (int.TryParse(parts[1], out var parsedUid))
+                            uid = parsedUid;
+                        break;
+
+                    case "Threads:":
+                        if (int.TryParse(parts[1], out var parsedThreads))
+                            threads = parsedThreads;
+                        break;
+
+                    case "VmRSS:":
+                        if (long.TryParse(parts[1], out var rssKb))
+                            vmRssBytes = rssKb * 1024; // переводим в байты
+                        break;
+
+                    case "VmSize:":
+                        if (long.TryParse(parts[1], out var vmsKb))
+                            vmSizeBytes = vmsKb * 1024; // переводим в байты
+                        break;
                 }
             }
         }
 
-        // /proc/[pid]/cmdline is NUL-separated
+        /// <summary>
+        /// Читает командную строку процесса из /proc/[pid]/cmdline. 
+        /// NUL-символы заменяются пробелами.
+        /// </summary>
+        /// <param name="path">Путь к cmdline файла.</param>
+        /// <returns>Командная строка процесса или null.</returns>
         public static string? ReadCmdline(string path)
         {
             try
             {
                 var bytes = File.ReadAllBytes(path);
                 if (bytes.Length == 0) return null;
+
+                // Заменяем NUL-символы пробелами
                 for (int i = 0; i < bytes.Length; i++)
                     if (bytes[i] == 0) bytes[i] = (byte)' ';
-                return System.Text.Encoding.UTF8.GetString(bytes).Trim();
+
+                var result = System.Text.Encoding.UTF8.GetString(bytes).Trim();
+                return result;
             }
-            catch { return null; }
+            catch
+            {
+                return null;
+            }
         }
+
 
         public static long? ReadReadBytesFromIo(string path)
         {
