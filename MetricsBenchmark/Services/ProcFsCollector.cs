@@ -37,7 +37,7 @@ public sealed class ProcFsCollector : IProcessCollector
             try
             {
                 var statRaw = File.ReadAllText(statPath);
-                var stat = ProcParsers.TryParseStat(statRaw);
+                var stat = ProcParsers.ParseStat(statRaw);
                 if (stat is null)
                     continue;
 
@@ -68,7 +68,7 @@ public sealed class ProcFsCollector : IProcessCollector
             try
             {
                 var statRaw = File.ReadAllText(statPath);
-                var stat = ProcParsers.TryParseStat(statRaw);
+                var stat = ProcParsers.ParseStat(statRaw);
                 if (stat is null)
                     continue;
 

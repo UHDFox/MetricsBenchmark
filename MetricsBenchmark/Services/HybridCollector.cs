@@ -83,7 +83,7 @@ public sealed class HybridCollector
                 // startTime: можно попытаться из Process.StartTime, но на Linux это часто pain.
                 // Берём из /proc/stat (унифицируем с ProcFS).
                 var statLine = File.ReadAllText(Path.Combine(dir, "stat"));
-                var stat = ProcParsers.TryParseStat(statLine);
+                var stat = ProcParsers.ParseStat(statLine);
                 if (stat is null)
                     continue;
 

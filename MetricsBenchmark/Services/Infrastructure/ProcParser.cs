@@ -7,7 +7,7 @@ namespace MetricsBenchmark.Services.Infrastructure
         private const int StatBase = 4;
         // /proc/[pid]/stat tricky: comm in parentheses may contain spaces.
         // Fields (1-based): 1 pid, 2 comm, 3 state, 14 utime, 15 stime, 22 starttime, 23 vsize, 24 rss
-        public static ProcStat? TryParseStat(string statLine)
+        public static ProcStat? ParseStat(string statLine)
         {
             int open = statLine.IndexOf('(');
             int close = statLine.LastIndexOf(')');
