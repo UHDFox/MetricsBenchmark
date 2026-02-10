@@ -1,6 +1,7 @@
 ﻿using MetricsBenchmark.Models;
 using MetricsBenchmark.Models.Data;
 using MetricsBenchmark.Services.Infrastructure;
+using MoSys.Agent.Infrastructure.Linux.Helpers;
 
 namespace MetricsBenchmark.Services;
 
@@ -37,7 +38,7 @@ public sealed class ProcFsCollector : IProcessCollector
             try
             {
                 var statRaw = File.ReadAllText(statPath);
-                var stat = ProcParsers.ParseStat(statRaw);
+                var stat = ProcessParser.ParseStat(statRaw);
                 if (stat is null)
                     continue;
 
@@ -68,7 +69,7 @@ public sealed class ProcFsCollector : IProcessCollector
             try
             {
                 var statRaw = File.ReadAllText(statPath);
-                var stat = ProcParsers.ParseStat(statRaw);
+                var stat = ProcessParser.ParseStat(statRaw);
                 if (stat is null)
                     continue;
 
@@ -76,14 +77,14 @@ public sealed class ProcFsCollector : IProcessCollector
                 var cpuPercent = CpuDelta.ComputeCpuPercent(prevCpu, currCpu, _cpuCount);
 
                 // cmdline
-                var cmdline = ProcParsers.ReadCmdline(Path.Combine(dir, "cmdline"));
+                var cmdline = ProcessParser.ReadCmdline(Path.Combine(dir, "cmdline"));
 
                 // user + threads + rss/vms (status)
                 int uid;
                 int? threads;
                 long? vmRssBytes;
                 long? vmSizeBytes;
-                ProcParsers.ParseStatus(File.ReadLines(Path.Combine(dir, "status")),
+                ProcessParser.ParseStatus(File.ReadLines(Path.Combine(dir, "status")),
                     out uid, out threads, out vmRssBytes, out vmSizeBytes);
 
                 var user = uid >= 0 ? _passwd.Resolve(uid) : "unknown";
@@ -103,7 +104,7 @@ public sealed class ProcFsCollector : IProcessCollector
 
                 long? readBytes = null;
                 if (Options.IncludeReadBytes)
-                    readBytes = ProcParsers.ReadReadBytesFromIo(Path.Combine(dir, "io"));
+                    readBytes = ProcessParser.ReadReadBytesFromIo(Path.Combine(dir, "io"));
 
                 // processName: comm из stat
                 var processName = stat.ProcessName;

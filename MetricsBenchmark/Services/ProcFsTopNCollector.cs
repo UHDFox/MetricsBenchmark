@@ -2,6 +2,7 @@ using MetricsBenchmark.Models;
 using MetricsBenchmark.Models.Data;
 using MetricsBenchmark.Services;
 using MetricsBenchmark.Services.Infrastructure;
+using MoSys.Agent.Infrastructure.Linux.Helpers;
 using System.Collections.Concurrent;
 
 public sealed class ProcFsParallelCollector : IProcessCollector
@@ -39,7 +40,7 @@ public sealed class ProcFsParallelCollector : IProcessCollector
             try
             {
                 var statRaw = File.ReadAllText(statPath);
-                var stat = ProcParsers.ParseStat(statRaw);
+                var stat = ProcessParser.ParseStat(statRaw);
                 if (stat is null)
                     return;
 
@@ -70,20 +71,20 @@ public sealed class ProcFsParallelCollector : IProcessCollector
             try
             {
                 var statRaw = File.ReadAllText(statPath);
-                var stat = ProcParsers.ParseStat(statRaw);
+                var stat = ProcessParser.ParseStat(statRaw);
                 if (stat is null)
                     return;
 
                 var cpuPercent = CpuDelta.ComputeCpuPercent(prevCpu, currCpu, _cpuCount);
 
-                var cmdline = ProcParsers.ReadCmdline(Path.Combine(dir, "cmdline"));
+                var cmdline = ProcessParser.ReadCmdline(Path.Combine(dir, "cmdline"));
 
                 int uid;
                 int? threads;
                 long? vmRssBytes;
                 long? vmSizeBytes;
 
-                ProcParsers.ParseStatus(File.ReadLines(Path.Combine(dir, "status")),
+                ProcessParser.ParseStatus(File.ReadLines(Path.Combine(dir, "status")),
                     out uid, out threads, out vmRssBytes, out vmSizeBytes);
 
                 var user = uid >= 0 ? _passwd.Resolve(uid) : "unknown";
@@ -93,7 +94,7 @@ public sealed class ProcFsParallelCollector : IProcessCollector
                 long? vmsBytes = Options.IncludeVms ? (vmSizeBytes ?? stat.VirtualMemoryBytes) : null;
                 int? thr = Options.IncludeThreads ? threads : null;
                 long? readBytes = Options.IncludeReadBytes
-                    ? ProcParsers.ReadReadBytesFromIo(Path.Combine(dir, "io"))
+                    ? ProcessParser.ReadReadBytesFromIo(Path.Combine(dir, "io"))
                     : null;
 
                 result.Add(new ProcessMetrics(

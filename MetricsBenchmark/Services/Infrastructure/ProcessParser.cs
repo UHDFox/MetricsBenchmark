@@ -1,8 +1,8 @@
-﻿using MetricsBenchmark.Models.Data;
+﻿using MoSys.Agent.Core.Models.Process;
 
-namespace MetricsBenchmark.Services.Infrastructure
+namespace MoSys.Agent.Infrastructure.Linux.Helpers
 {
-        public static class ProcParsers
+    public static class ProcessParser
     {
         // После извлечения comm (2) и state (3) первый токен соответствует полю №4 (ppid)
         private const int FirstTokenFieldIndex = 4;
@@ -10,25 +10,25 @@ namespace MetricsBenchmark.Services.Infrastructure
         private const int FieldOffset = FirstTokenFieldIndex - 1;
         private const int UnknownUid = -1;
 
-        public static ProcStat? ParseStat(string statLine)
+        public static ProcessStatData? ParseStat(string statLine)
         {
             int openParenIndex = statLine.IndexOf('(');
             int closeParenIndex = statLine.LastIndexOf(')');
 
-            if (openParenIndex < 0 || closeParenIndex <= openParenIndex) 
+            if (openParenIndex < 0 || closeParenIndex <= openParenIndex)
             {
                 return null;
             }
             var processNameLength = closeParenIndex - openParenIndex - 1;
             string processName = statLine.Substring(openParenIndex + 1, processNameLength);
-            if (closeParenIndex + 2 >= statLine.Length) 
+            if (closeParenIndex + 2 >= statLine.Length)
             {
                 return null;
             }
 
             // Строка после "comm) "
             var afterCommSpan = statLine.AsSpan(closeParenIndex + 2);
-            if (afterCommSpan.Length < 1) 
+            if (afterCommSpan.Length < 1)
             {
                 return null;
             }
@@ -39,42 +39,13 @@ namespace MetricsBenchmark.Services.Infrastructure
             ReadOnlySpan<char> tokenSpan =
                 afterCommSpan.Length > 2 ? afterCommSpan.Slice(2) : ReadOnlySpan<char>.Empty;
 
-            long utime = 0;
-            long stime = 0;
-            long startTime = 0;
-            long vsize = 0;
-            long rss = 0;
+            var tokens = GetStatTokens(tokenSpan);
+            if (tokens.Length < Enum.GetValues<ProcessStatIndex>().Length) // проверка на минимальный набор полей
+                return null;
 
-            EnumerateTokens(tokenSpan, (token, tokenIndex) =>
-            {
-                // tokenIndex начинается с 1 и соответствует полю №4 (ppid)
-                int fieldIndex = FirstTokenFieldIndex + FieldOffset;
+            var process = CreateProcessStatData(processName, state, tokens);
 
-                switch ((ProcessStatField)fieldIndex)
-                {
-                    case ProcessStatField.Utime:
-                        long.TryParse(token, out utime);
-                        break;
-
-                    case ProcessStatField.Stime:
-                        long.TryParse(token, out stime);
-                        break;
-
-                    case ProcessStatField.StartTime:
-                        long.TryParse(token, out startTime);
-                        break;
-
-                    case ProcessStatField.Vsize:
-                        long.TryParse(token, out vsize);
-                        break;
-
-                    case ProcessStatField.Rss:
-                        long.TryParse(token, out rss);
-                        break;
-                }
-            });
-
-            return new ProcStat(processName, state, utime, stime, startTime, vsize, rss);
+            return process;
         }
 
         /// <summary>
@@ -142,7 +113,7 @@ namespace MetricsBenchmark.Services.Infrastructure
             foreach (var line in lines)
             {
                 var parts = line.Split((char[])null!, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length < 2) 
+                if (parts.Length < 2)
                 {
                     continue;
                 }
@@ -199,7 +170,6 @@ namespace MetricsBenchmark.Services.Infrastructure
             }
         }
 
-
         public static long? ReadReadBytesFromIo(string path)
         {
             try
@@ -217,5 +187,48 @@ namespace MetricsBenchmark.Services.Infrastructure
             }
             catch { return null; }
         }
+
+        /// <summary>
+        /// Создает объект ProcessStatData из имени процесса, состояния и массива токенов.
+        /// </summary>
+        private static ProcessStatData CreateProcessStatData(string processName, char state, string[] tokens)
+        {
+            long utime = long.Parse(tokens[(int)ProcessStatIndex.Utime - FirstTokenFieldIndex]);
+            long stime = long.Parse(tokens[(int)ProcessStatIndex.Stime - FirstTokenFieldIndex]);
+            long start = long.Parse(tokens[(int)ProcessStatIndex.StartTime - FirstTokenFieldIndex]);
+            long vsize = long.Parse(tokens[(int)ProcessStatIndex.Vsize - FirstTokenFieldIndex]);
+            long rss = long.Parse(tokens[(int)ProcessStatIndex.Rss - FirstTokenFieldIndex]);
+
+            return new ProcessStatData(processName, state, utime, stime, start, vsize, rss);
+        }
+
+
+        /// <summary>
+        /// Разбивает часть строки /proc/[pid]/stat после имени процесса и состояния на отдельные токены.
+        /// </summary>
+        private static string[] GetStatTokens(ReadOnlySpan<char> tokenSpan)
+        {
+            var tokens = new List<string>();
+            int tokenStart = 0;
+
+            for (int pos = 0; pos <= tokenSpan.Length; pos++)
+            {
+                bool atEnd = pos == tokenSpan.Length;
+                bool isSpace = !atEnd && tokenSpan[pos] == ' ';
+
+                if (atEnd || isSpace)
+                {
+                    int len = pos - tokenStart;
+                    if (len > 0)
+                    {
+                        tokens.Add(tokenSpan.Slice(tokenStart, len).ToString());
+                    }
+                    tokenStart = pos + 1;
+                }
+            }
+
+            return tokens.ToArray();
+        }
     }
 }
+

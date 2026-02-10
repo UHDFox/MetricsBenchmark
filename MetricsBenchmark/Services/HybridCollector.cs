@@ -1,6 +1,7 @@
 ﻿using MetricsBenchmark.Models;
 using MetricsBenchmark.Models.Data;
 using MetricsBenchmark.Services.Infrastructure;
+using MoSys.Agent.Infrastructure.Linux.Helpers;
 using System.Diagnostics;
 
 namespace MetricsBench.Collectors;
@@ -69,13 +70,13 @@ public sealed class HybridCollector
                 // cmdline/user/rss/vms/state/io: из /proc (стабильнее на Linux)
                 var dir = $"/proc/{pid}";
 
-                var cmdline = ProcParsers.ReadCmdline(Path.Combine(dir, "cmdline"));
+                var cmdline = ProcessParser.ReadCmdline(Path.Combine(dir, "cmdline"));
 
                 int uid;
                 int? threads;
                 long? vmRssBytes;
                 long? vmSizeBytes;
-                ProcParsers.ParseStatus(File.ReadLines(Path.Combine(dir, "status")),
+                ProcessParser.ParseStatus(File.ReadLines(Path.Combine(dir, "status")),
                     out uid, out threads, out vmRssBytes, out vmSizeBytes);
 
                 var user = uid >= 0 ? _passwd.Resolve(uid) : "unknown";
@@ -83,7 +84,7 @@ public sealed class HybridCollector
                 // startTime: можно попытаться из Process.StartTime, но на Linux это часто pain.
                 // Берём из /proc/stat (унифицируем с ProcFS).
                 var statLine = File.ReadAllText(Path.Combine(dir, "stat"));
-                var stat = ProcParsers.ParseStat(statLine);
+                var stat = ProcessParser.ParseStat(statLine);
                 if (stat is null)
                     continue;
 
@@ -102,7 +103,7 @@ public sealed class HybridCollector
 
                 long? readBytes = null;
                 if (Options.IncludeReadBytes)
-                    readBytes = ProcParsers.ReadReadBytesFromIo(Path.Combine(dir, "io"));
+                    readBytes = ProcessParser.ReadReadBytesFromIo(Path.Combine(dir, "io"));
 
                 list.Add(new ProcessMetrics(
                     Pid: pid,
